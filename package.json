@@ -1,0 +1,16 @@
+{
+  "name": "open-drive",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint:js": "eslint js/**/*.js",
+    "lint:html": "html-validate index.html",
+    "lint": "npm run lint:js && npm run lint:html"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "eslint": "^9.39.1",
+    "globals": "^16.5.0",
+    "html-validate": "^10.4.0"
+  }
+}

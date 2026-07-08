@@ -1,4 +1,4 @@
-import { TILE, LAND_MIN, LAND_MAX } from "./world.js";
+import { TILE, LAND_MIN, LAND_MAX, T_ROAD } from "./world.js";
 import { Car } from "./car.js";
 
 const NAMES = [
@@ -12,12 +12,15 @@ const NAMES = [
   'Pearl "Six Toes" Lombardi',
 ];
 
-const COP_COUNT = 3;
+const COP_COUNT = 2;
+const FOOT_COP_COUNT = 3;
 const PIN_DIST = 72; // cop this close while you're slow = getting pinned
 const PIN_MAX_SPEED = 75;
 const BUSTED_TIME = 2.5;
 const STOP_DIST = 85; // how close (and slow) you must be at a marker
 const STOP_SPEED = 45;
+const PED_R = 7;
+const KNOCK_SPEED = 60;
 
 function pick(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
@@ -134,6 +137,259 @@ class Cop extends Car {
   }
 }
 
+// ---------------------------------------------------------------- spike strip
+
+class SpikeStrip {
+  constructor(x, y, heading) {
+    this.x = x;
+    this.y = y;
+    this.heading = heading;
+    this.length = 96;
+    this.width = 14;
+    this.life = 50;
+    this.triggered = false;
+  }
+
+  contains(px, py, pr) {
+    const dx = px - this.x;
+    const dy = py - this.y;
+    const cos = Math.cos(-this.heading);
+    const sin = Math.sin(-this.heading);
+    const lx = dx * cos - dy * sin;
+    const ly = dx * sin + dy * cos;
+    return (
+      Math.abs(lx) < this.length * 0.5 + pr &&
+      Math.abs(ly) < this.width * 0.5 + pr
+    );
+  }
+
+  update(dt) {
+    this.life -= dt;
+  }
+
+  draw(ctx) {
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.heading);
+
+    ctx.fillStyle = "rgba(20,20,24,0.82)";
+    ctx.fillRect(-this.length * 0.5, -this.width * 0.5, this.length, this.width);
+
+    ctx.fillStyle = "#f0a020";
+    for (let i = -this.length * 0.42; i <= this.length * 0.42; i += 10) {
+      ctx.beginPath();
+      ctx.moveTo(i - 3, this.width * 0.5);
+      ctx.lineTo(i, -this.width * 0.55);
+      ctx.lineTo(i + 3, this.width * 0.5);
+      ctx.fill();
+    }
+
+    ctx.strokeStyle = "rgba(255,220,80,0.55)";
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(-this.length * 0.5, -this.width * 0.5, this.length, this.width);
+
+    ctx.restore();
+  }
+}
+
+// ---------------------------------------------------------------- foot cop
+
+class FootCop {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    this.angle = Math.random() * Math.PI * 2;
+    this.walkSpeed = 74 + Math.random() * 18;
+    this.down = false;
+    this.downTimer = 0;
+    this.kvx = 0;
+    this.kvy = 0;
+    this.spin = 0;
+    this.deployCooldown = 1.5 + Math.random() * 2.5;
+    this.leaving = false;
+    this.leaveT = 0;
+  }
+
+  knock(ivx, ivy, nx, ny) {
+    this.down = true;
+    this.downTimer = 3.5 + Math.random() * 2.5;
+    this.kvx = ivx * 0.7 + nx * 75;
+    this.kvy = ivy * 0.7 + ny * 75;
+    this.spin = (Math.random() - 0.5) * 12;
+  }
+
+  tryDeploy(spikes, player, world) {
+    const speed = player.speed;
+    if (speed < 70) return false;
+
+    const nx = player.vx / speed;
+    const ny = player.vy / speed;
+    const ahead = 160 + speed * 0.38;
+    let px = player.x + nx * ahead;
+    let py = player.y + ny * ahead;
+
+    let tx = Math.floor(px / TILE);
+    let ty = Math.floor(py / TILE);
+    if (world.tileAt(tx, ty) !== T_ROAD) {
+      for (let k = 0; k < 6; k++) {
+        tx = Math.floor((player.x + nx * (ahead - k * 28)) / TILE);
+        ty = Math.floor((player.y + ny * (ahead - k * 28)) / TILE);
+        if (world.tileAt(tx, ty) === T_ROAD) {
+          px = (tx + 0.5) * TILE;
+          py = (ty + 0.5) * TILE;
+          break;
+        }
+      }
+      if (world.tileAt(tx, ty) !== T_ROAD) return false;
+    }
+
+    const heading = Math.atan2(ny, nx) + Math.PI / 2;
+    spikes.push(new SpikeStrip(px, py, heading));
+    return true;
+  }
+
+  update(dt, player, spikes, world) {
+    if (this.down) {
+      this.x += this.kvx * dt;
+      this.y += this.kvy * dt;
+      const k = Math.exp(-2.4 * dt);
+      this.kvx *= k;
+      this.kvy *= k;
+      this.angle += this.spin * dt;
+      this.spin *= Math.exp(-1.6 * dt);
+      this.downTimer -= dt;
+      if (this.downTimer <= 0) {
+        this.down = false;
+        this.deployCooldown = 4 + Math.random() * 3;
+      }
+      return;
+    }
+
+    let tx;
+    let ty;
+    if (this.leaving) {
+      this.leaveT += dt;
+      const dx = player.x - this.x;
+      const dy = player.y - this.y;
+      const d = Math.hypot(dx, dy) || 1;
+      tx = this.x - (dx / d) * 220;
+      ty = this.y - (dy / d) * 220;
+    } else {
+      const lead = 1.1 + Math.min(player.speed / 420, 0.8);
+      tx = player.x + player.vx * lead;
+      ty = player.y + player.vy * lead;
+    }
+
+    const dx = tx - this.x;
+    const dy = ty - this.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist > 8) {
+      const want = Math.atan2(dy, dx);
+      let diff = want - this.angle;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      this.angle += diff * Math.min(1, 9 * dt);
+      this.x += Math.cos(this.angle) * this.walkSpeed * dt;
+      this.y += Math.sin(this.angle) * this.walkSpeed * dt;
+    }
+
+    if (!this.leaving) {
+      this.deployCooldown -= dt;
+      const toPlayer = Math.hypot(player.x - this.x, player.y - this.y);
+      if (
+        this.deployCooldown <= 0 &&
+        toPlayer > 220 &&
+        toPlayer < 720 &&
+        player.speed > 80
+      ) {
+        if (this.tryDeploy(spikes, player, world)) {
+          this.deployCooldown = 9 + Math.random() * 7;
+        } else {
+          this.deployCooldown = 2.5;
+        }
+      }
+    }
+  }
+
+  hitByPlayer(player) {
+    const dx = this.x - player.x;
+    const dy = this.y - player.y;
+    const d = Math.hypot(dx, dy);
+    const pSpeed = player.speed;
+    if (d < player.radius + PED_R && pSpeed > KNOCK_SPEED) {
+      const nx = d > 0.01 ? dx / d : 1;
+      const ny = d > 0.01 ? dy / d : 0;
+      this.knock(player.vx, player.vy, nx, ny);
+      player.vx *= 0.985;
+      player.vy *= 0.985;
+      return true;
+    }
+    return false;
+  }
+
+  hitByVehicle(v) {
+    if (Math.abs(v.x - this.x) > 34 || Math.abs(v.y - this.y) > 34) return;
+    const cvx = v.vx;
+    const cvy = v.vy;
+    const cSpeed = Math.hypot(cvx, cvy);
+    if (cSpeed < 45) return;
+    const dx = this.x - v.x;
+    const dy = this.y - v.y;
+    const d = Math.hypot(dx, dy);
+    if (d < (v.radius ?? 16) + PED_R) {
+      const nx = d > 0.01 ? dx / d : 1;
+      const ny = d > 0.01 ? dy / d : 0;
+      this.knock(cvx, cvy, nx, ny);
+    }
+  }
+
+  draw(ctx) {
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.angle);
+
+    ctx.fillStyle = "rgba(0,0,0,0.22)";
+    ctx.beginPath();
+    ctx.ellipse(1.5, 2, 6, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (this.down) {
+      ctx.strokeStyle = "#1e3a7a";
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(-2, -4); ctx.lineTo(-6, -8);
+      ctx.moveTo(-2, 4); ctx.lineTo(-6, 8);
+      ctx.moveTo(2, -4); ctx.lineTo(6, -7);
+      ctx.moveTo(2, 4); ctx.lineTo(6, 7);
+      ctx.stroke();
+      ctx.fillStyle = "#1e3a7a";
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 6, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#e8b88a";
+      ctx.beginPath();
+      ctx.arc(7.5, 0, 3, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.fillStyle = "#ffd84a";
+      ctx.beginPath();
+      ctx.arc(1, -4.5, 2.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#1e3a7a";
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 4.5, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#e8b88a";
+      ctx.beginPath();
+      ctx.arc(1.2, 0, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+}
+
 // ------------------------------------------------------------------ manager
 
 export class Missions {
@@ -145,6 +401,8 @@ export class Missions {
     this.skids = skids;
 
     this.cops = [];
+    this.footCops = [];
+    this.spikes = [];
     traffic.extra = this.cops;
 
     this.state = "idle";
@@ -194,9 +452,10 @@ export class Missions {
     this.state = "deliver";
     this.bustedT = 0;
     this.spawnCops(COP_COUNT);
+    this.spawnFootCops(FOOT_COP_COUNT);
     this.hud.setBanner(
       `Deliver ${this.name}`,
-      "Get to the drop-off. Keep moving — don't let the cops pin you!",
+      "Get to the drop-off. Car cops chase you — foot cops lay spike strips!",
       "hot"
     );
   }
@@ -211,6 +470,22 @@ export class Missions {
     }
   }
 
+  spawnFootCops(n) {
+    const walks = this.traffic.sidewalks;
+    for (let k = 0; k < n; k++) {
+      let x = this.player.x;
+      let y = this.player.y;
+      for (let attempt = 0; attempt < 20; attempt++) {
+        const s = pick(walks);
+        x = (s.tx + 0.2 + Math.random() * 0.6) * TILE;
+        y = (s.ty + 0.2 + Math.random() * 0.6) * TILE;
+        const d = Math.hypot(x - this.player.x, y - this.player.y);
+        if (d > 500 && d < 1400) break;
+      }
+      this.footCops.push(new FootCop(x, y));
+    }
+  }
+
   dismissCops() {
     const mid = (LAND_MIN + LAND_MAX) / 2;
     for (const c of this.cops) {
@@ -221,6 +496,11 @@ export class Missions {
         y: this.player.y < mid ? LAND_MAX - 160 : LAND_MIN + 160,
       };
     }
+    for (const f of this.footCops) {
+      f.leaving = true;
+      f.leaveT = 0;
+    }
+    this.spikes = [];
   }
 
   complete() {
@@ -260,6 +540,8 @@ export class Missions {
       this.traffic.collideVehicle(c);
     }
     this.copCollisions();
+    this.updateFootCops(dt);
+    this.updateSpikes(dt);
     for (let i = this.cops.length - 1; i >= 0; i--) {
       const c = this.cops[i];
       if (c.leaving && (c.leaveT > 10 || Math.hypot(c.x - p.x, c.y - p.y) > 1400)) {
@@ -300,6 +582,18 @@ export class Missions {
             break;
           }
         }
+        if (!pinned) {
+          for (const f of this.footCops) {
+            if (f.down || f.leaving) continue;
+            if (
+              Math.hypot(f.x - p.x, f.y - p.y) < PIN_DIST &&
+              p.speed < PIN_MAX_SPEED
+            ) {
+              pinned = true;
+              break;
+            }
+          }
+        }
         this.bustedT = Math.max(
           0,
           Math.min(BUSTED_TIME, this.bustedT + (pinned ? dt : -1.4 * dt))
@@ -321,11 +615,47 @@ export class Missions {
         if (this.timer <= 0) {
           this.state = "idle";
           this.timer = 1;
+          this.cops = [];
+          this.footCops = [];
+          this.spikes = [];
         }
         break;
     }
 
     this.hud.setBusted(this.state === "deliver" ? this.bustedT / BUSTED_TIME : 0);
+  }
+
+  updateFootCops(dt) {
+    if (this.state !== "deliver" && this.state !== "complete" && this.state !== "failed") {
+      return;
+    }
+    const p = this.player;
+    for (const f of this.footCops) {
+      f.update(dt, p, this.spikes, this.world);
+      f.hitByPlayer(p);
+      f.hitByVehicle(p);
+      for (const c of this.cops) f.hitByVehicle(c);
+    }
+    for (let i = this.footCops.length - 1; i >= 0; i--) {
+      const f = this.footCops[i];
+      if (f.leaving && (f.leaveT > 8 || Math.hypot(f.x - p.x, f.y - p.y) > 1200)) {
+        this.footCops.splice(i, 1);
+      }
+    }
+  }
+
+  updateSpikes(dt) {
+    const p = this.player;
+    for (const s of this.spikes) {
+      s.update(dt);
+      if (!s.triggered && s.contains(p.x, p.y, p.radius) && p.speed > 35) {
+        s.triggered = true;
+        p.popTires();
+      }
+    }
+    for (let i = this.spikes.length - 1; i >= 0; i--) {
+      if (this.spikes[i].life <= 0) this.spikes.splice(i, 1);
+    }
   }
 
   copCollisions() {
@@ -431,6 +761,22 @@ export class Missions {
       ) continue;
       c.draw(ctx, this.t);
       c.drawSmoke(ctx);
+    }
+
+    for (const s of this.spikes) {
+      if (
+        s.x + 60 < view.x || s.x - 60 > view.x + view.w ||
+        s.y + 20 < view.y || s.y - 20 > view.y + view.h
+      ) continue;
+      s.draw(ctx);
+    }
+
+    for (const f of this.footCops) {
+      if (
+        f.x + 14 < view.x || f.x - 14 > view.x + view.w ||
+        f.y + 14 < view.y || f.y - 14 > view.y + view.h
+      ) continue;
+      f.draw(ctx);
     }
   }
 

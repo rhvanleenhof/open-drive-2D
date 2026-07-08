@@ -73,6 +73,8 @@ export class Car {
     this.wrecked = false;
     this.smoke = [];
     this.smokeTimer = 0;
+    this.tiresBlown = false;
+    this.tireGrip = 1;
   }
 
   get speed() {
@@ -113,8 +115,9 @@ export class Car {
     if (Math.abs(vFwd) < ROLL_RESIST * dt) vFwd = 0;
     else vFwd -= Math.sign(vFwd) * ROLL_RESIST * dt;
 
-    // Lateral grip (reduced while sliding on the handbrake).
-    const grip = input.handbrake ? GRIP_HANDBRAKE : GRIP;
+    // Lateral grip (reduced while sliding on the handbrake or after spike strips).
+    const baseGrip = input.handbrake ? GRIP_HANDBRAKE : GRIP;
+    const grip = baseGrip * this.tireGrip;
     vLat *= Math.exp(-grip * dt);
 
     // Steering: no effect at standstill, softened at high speed.
@@ -123,7 +126,8 @@ export class Car {
     const speedT = Math.min(speed / 110, 1);
     const highSpeedDamp = 1 / (1 + speed / 750);
     const dir = vFwd < -5 ? -1 : 1;
-    this.heading += steer * TURN_RATE * speedT * highSpeedDamp * dir * dt;
+    const steerMult = this.tiresBlown ? 0.62 : 1;
+    this.heading += steer * TURN_RATE * speedT * highSpeedDamp * dir * steerMult * dt;
     this.steerVisual += (steer * 0.45 - this.steerVisual) * Math.min(1, dt * 12);
 
     // Recompose velocity along the (possibly rotated) heading.
@@ -146,9 +150,19 @@ export class Car {
     if (this.health === 0) this.wrecked = true;
   }
 
+  popTires() {
+    if (this.tiresBlown) return;
+    this.tiresBlown = true;
+    this.tireGrip = 0.24;
+    this.vx *= 0.72;
+    this.vy *= 0.72;
+  }
+
   repair() {
     this.health = this.maxHealth;
     this.wrecked = false;
+    this.tiresBlown = false;
+    this.tireGrip = 1;
   }
 
   updateSmoke(dt) {
@@ -303,10 +317,26 @@ export class Car {
       ctx.fill();
       ctx.restore();
     };
-    wheel(14, -11, this.steerVisual);
-    wheel(14, 11, this.steerVisual);
+    const flat = this.tiresBlown ? 0.55 : 1;
+    wheel(14, -11, this.steerVisual * flat);
+    wheel(14, 11, this.steerVisual * flat);
     wheel(-15, -11, 0);
     wheel(-15, 11, 0);
+    if (this.tiresBlown) {
+      ctx.fillStyle = "rgba(30,30,34,0.5)";
+      ctx.beginPath();
+      ctx.ellipse(14, -11, 7, 2.5, this.steerVisual * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(14, 11, 7, 2.5, this.steerVisual * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(-15, -11, 7, 2.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(-15, 11, 7, 2.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     // Body.
     ctx.fillStyle = this.wrecked ? "#6e3a32" : "#d84f3f";

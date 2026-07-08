@@ -1,4 +1,8 @@
 import { TILE, GRID, T_SIDEWALK, T_ROAD } from "./world.js";
+import { MAX_SPEED } from "./car.js";
+
+const AGGRESSIVE_CHANCE = 1 / 15;
+const AGGRESSIVE_CHASE = 1600;
 
 const DIRS = {
   E: { x: 1, y: 0 },
@@ -68,6 +72,8 @@ class TrafficCar {
       this.angle = Math.atan2(d.y, d.x);
       this.speed = 0;
       this.cruise = 170 + Math.random() * 90;
+      this.aggressive = Math.random() < AGGRESSIVE_CHANCE;
+      this.ramDealt = false;
       this.crashed = false;
       this.crashTimer = 0;
       this.cvx = 0;
@@ -115,6 +121,11 @@ class TrafficCar {
       return;
     }
 
+    if (this.aggressive) {
+      this.updateAggressive(dt, player);
+      return;
+    }
+
     const wp = this.wps[0];
     let dx = wp.x - this.x;
     let dy = wp.y - this.y;
@@ -153,7 +164,52 @@ class TrafficCar {
     this.y += this.hy * this.speed * dt;
   }
 
-  obstacleSpeed(player) {
+  updateAggressive(dt, player) {
+    const pdx = player.x - this.x;
+    const pdy = player.y - this.y;
+    const pDist = Math.hypot(pdx, pdy);
+    const chasing = pDist > 40 && pDist < AGGRESSIVE_CHASE;
+
+    let tx;
+    let ty;
+    if (chasing) {
+      tx = pdx / pDist;
+      ty = pdy / pDist;
+    } else {
+      const wp = this.wps[0];
+      let dx = wp.x - this.x;
+      let dy = wp.y - this.y;
+      let dist = Math.hypot(dx, dy);
+      if (dist < Math.max(10, this.speed * dt * 2)) {
+        this.mgr.advanceWp(this);
+        const w2 = this.wps[0];
+        dx = w2.x - this.x;
+        dy = w2.y - this.y;
+        dist = Math.hypot(dx, dy) || 1;
+      }
+      tx = dx / dist;
+      ty = dy / dist;
+    }
+
+    const s = Math.min(1, (chasing ? 11 : 9) * dt);
+    this.hx += (tx - this.hx) * s;
+    this.hy += (ty - this.hy) * s;
+    const hl = Math.hypot(this.hx, this.hy) || 1;
+    this.hx /= hl;
+    this.hy /= hl;
+    this.angle = Math.atan2(this.hy, this.hx);
+
+    let target = MAX_SPEED;
+    target = Math.min(target, this.obstacleSpeed(player, true));
+
+    const rate = target < this.speed ? 5 : 2.8;
+    this.speed += (target - this.speed) * Math.min(1, rate * dt);
+
+    this.x += this.hx * this.speed * dt;
+    this.y += this.hy * this.speed * dt;
+  }
+
+  obstacleSpeed(player, skipPlayer = false) {
     const look = 75 + this.speed * 0.4;
     let allowed = Infinity;
 
@@ -176,7 +232,7 @@ class TrafficCar {
       if (Math.abs(o.x - this.x) > 220 || Math.abs(o.y - this.y) > 220) continue;
       check(o.x, o.y, 0, 28);
     }
-    check(player.x, player.y, 0, 31);
+    if (!skipPlayer) check(player.x, player.y, 0, 31);
     return allowed;
   }
 
@@ -194,10 +250,14 @@ class TrafficCar {
     ctx.fillRect(10, -11, 9, 22);
     ctx.fillRect(-17, -11, 9, 22);
 
-    ctx.fillStyle = this.color;
+    ctx.fillStyle = this.aggressive ? "#8b3030" : this.color;
     ctx.beginPath();
     ctx.roundRect(-22, -10, 44, 20, 6);
     ctx.fill();
+    if (this.aggressive) {
+      ctx.fillStyle = "#c04040";
+      ctx.fillRect(-8, -10, 16, 20);
+    }
     ctx.strokeStyle = "rgba(0,0,0,0.3)";
     ctx.lineWidth = 1.5;
     ctx.stroke();
@@ -516,7 +576,12 @@ export class Traffic {
       c.crash(impulseX, impulseY);
 
       const impact = -rvn;
-      if (impact > 200 && v.damage) v.damage((impact - 200) * 0.03);
+      if (c.aggressive && impact > 80 && v.damage && !c.ramDealt) {
+        v.damage(v.maxHealth * 0.5);
+        c.ramDealt = true;
+      } else if (!c.aggressive && impact > 200 && v.damage) {
+        v.damage((impact - 200) * 0.03);
+      }
     }
   }
 

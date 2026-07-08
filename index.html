@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Open Drive</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div id="hud">
+    <canvas id="minimap" width="176" height="176"></canvas>
+
+    <div id="jobs"><span class="label">JOBS</span><span id="jobs-count">0</span></div>
+
+    <div id="banner">
+      <div id="banner-title"></div>
+      <div id="banner-sub"></div>
+    </div>
+
+    <div id="busted">
+      <div class="label">GETTING PINNED!</div>
+      <div class="bar"><div id="busted-fill"></div></div>
+    </div>
+
+    <div id="damage">
+      <span class="label">CAR</span>
+      <div class="bar"><div id="damage-fill"></div></div>
+    </div>
+
+    <div id="speedo">
+      <span id="speed-value">0</span>
+      <span class="unit">km/h</span>
+    </div>
+
+    <div id="hint">
+      <div class="hint-row"><kbd>W</kbd><kbd>&uarr;</kbd><span>accelerate</span></div>
+      <div class="hint-row"><kbd>S</kbd><kbd>&darr;</kbd><span>brake / reverse</span></div>
+      <div class="hint-row"><kbd>A</kbd><kbd>D</kbd><span>steer</span></div>
+      <div class="hint-row"><kbd>Space</kbd><span>handbrake</span></div>
+    </div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

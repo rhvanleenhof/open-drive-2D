@@ -6,10 +6,36 @@
   <title>Open Drive</title>
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
-  <canvas id="game"></canvas>
+<body class="view-home">
+  <nav id="nav">
+    <span class="nav-brand">Open Drive</span>
+    <div class="nav-links">
+      <a href="#" id="nav-home" class="nav-link active">Home</a>
+      <a href="#" id="nav-play" class="nav-link">Play</a>
+    </div>
+  </nav>
 
-  <div id="hud">
+  <div id="home-preview-wrap" aria-hidden="true">
+    <canvas id="home-preview"></canvas>
+  </div>
+
+  <main id="home">
+    <div class="home-content">
+      <div class="home-hero">
+        <p class="home-eyebrow">Top-down getaway driving</p>
+        <h1 class="home-title">Open<br>Drive</h1>
+        <p class="home-tagline">
+          Cruise a procedurally generated city, pick up wanted fares,
+          and deliver them across town — without letting the cops pin you down.
+        </p>
+        <button type="button" id="home-play" class="home-cta">Start driving</button>
+      </div>
+    </div>
+  </main>
+
+  <canvas id="game" hidden></canvas>
+
+  <div id="hud" hidden>
     <canvas id="minimap" width="176" height="176"></canvas>
 
     <div id="jobs"><span class="label">JOBS</span><span id="jobs-count">0</span></div>
